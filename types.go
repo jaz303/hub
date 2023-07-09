@@ -47,7 +47,7 @@ type Config[ID comparable, IM any] struct {
 	// Encode an outgoing message
 	EncodeOutoingMessage func(any) (websocket.MessageType, []byte, error)
 
-	// Logger - defaults to log.Printf(). Use wss.NullLogger to silence output.
+	// Logger - defaults to log.Printf(). Use hub.NullLogger to silence output.
 	Logger func(string, ...any)
 }
 
