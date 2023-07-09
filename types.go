@@ -11,7 +11,7 @@ import (
 
 func NullLogger(msg string, args ...any) {}
 
-type Config[ID comparable, CLI any, IM any] struct {
+type Config[ID comparable, IM any] struct {
 	AcceptOptions *websocket.AcceptOptions
 
 	// Maximum number of outgoing messages that can be queued for
@@ -25,7 +25,7 @@ type Config[ID comparable, CLI any, IM any] struct {
 	// on failure.
 	// The callback must abort if the request's Context is cancelled
 	// before completion.
-	Authenticate func(uint64, *websocket.Conn, *http.Request) (ID, CLI, websocket.StatusCode, string)
+	Authenticate func(uint64, *websocket.Conn, *http.Request) (ID, any, websocket.StatusCode, string)
 
 	// Callback to determine if a new, authenticated connection should be
 	// accepted for registration. Use this function to implement connection
@@ -39,7 +39,7 @@ type Config[ID comparable, CLI any, IM any] struct {
 	// This function is called from the server's main loop so should complete
 	// quickly. The provided Roster instance must not be stored elsewhere as it
 	// is not threadsafe.
-	Accept func(conn *Conn[ID, CLI, IM], roster *Roster[ID, CLI, IM]) (bool, []*Conn[ID, CLI, IM])
+	Accept func(conn *Conn[ID, IM], roster *Roster[ID, IM]) (bool, []*Conn[ID, IM])
 
 	// Decode an incoming message into an instance of IM
 	DecodeIncomingMessage func(websocket.MessageType, []byte) (IM, error)
@@ -51,27 +51,27 @@ type Config[ID comparable, CLI any, IM any] struct {
 	Logger func(string, ...any)
 }
 
-type Conn[ID comparable, CLI any, IM any] struct {
+type Conn[ID comparable, IM any] struct {
 	valid        bool
 	context      context.Context
 	cancel       context.CancelFunc
 	connectionID uint64
 	clientID     ID
-	client       CLI
+	client       any
 	sock         *websocket.Conn
 	outgoing     chan any
 }
 
-func (c *Conn[ID, CLI, IM]) String() string {
+func (c *Conn[ID, IM]) String() string {
 	return fmt.Sprintf("connection[id=%d, client=%v]", c.connectionID, c.clientID)
 }
 
-func (c *Conn[ID, CLI, IM]) ConnectionID() uint64 { return c.connectionID }
-func (c *Conn[ID, CLI, IM]) ClientID() ID         { return c.clientID }
-func (c *Conn[ID, CLI, IM]) ClientInfo() CLI      { return c.client }
+func (c *Conn[ID, IM]) ConnectionID() uint64 { return c.connectionID }
+func (c *Conn[ID, IM]) ClientID() ID         { return c.clientID }
+func (c *Conn[ID, IM]) ClientInfo() any      { return c.client }
 
-type IncomingMessage[ID comparable, CLI any, IM any] struct {
+type IncomingMessage[ID comparable, IM any] struct {
 	ReceivedAt time.Time
-	Conn       *Conn[ID, CLI, IM]
+	Conn       *Conn[ID, IM]
 	Msg        IM
 }

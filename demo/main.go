@@ -12,9 +12,9 @@ import (
 	"nhooyr.io/websocket"
 )
 
-type Config = hub.Config[username, *user, *chatMessage]
-type Roster = hub.Roster[username, *user, *chatMessage]
-type Conn = hub.Conn[username, *user, *chatMessage]
+type Config = hub.Config[username, *chatMessage]
+type Roster = hub.Roster[username, *chatMessage]
+type Conn = hub.Conn[username, *chatMessage]
 
 type username string
 
@@ -35,7 +35,7 @@ func main() {
 		// Dummy authentication handler that trusts the username
 		// supplied by the client. In reality we'd probably want
 		// to perform some sort of password checking here.
-		Authenticate: func(u uint64, c *websocket.Conn, r *http.Request) (username, *user, websocket.StatusCode, string) {
+		Authenticate: func(u uint64, c *websocket.Conn, r *http.Request) (username, any, websocket.StatusCode, string) {
 			_, msgData, err := c.Read(r.Context())
 			if err != nil {
 				return "", nil, websocket.StatusInternalError, "auth-fail"

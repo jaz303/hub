@@ -18,41 +18,41 @@ const (
 	defaultSendBufferSize = 16
 )
 
-type Hub[ID comparable, CLI any, IM any] struct {
+type Hub[ID comparable, IM any] struct {
 	context        context.Context
 	acceptOptions  *websocket.AcceptOptions
 	sendBufferSize int
-	authenticate   func(uint64, *websocket.Conn, *http.Request) (ID, CLI, websocket.StatusCode, string)
-	accept         func(conn *Conn[ID, CLI, IM], roster *Roster[ID, CLI, IM]) (bool, []*Conn[ID, CLI, IM])
+	authenticate   func(uint64, *websocket.Conn, *http.Request) (ID, any, websocket.StatusCode, string)
+	accept         func(conn *Conn[ID, IM], roster *Roster[ID, IM]) (bool, []*Conn[ID, IM])
 	decodeMessage  func(websocket.MessageType, []byte) (IM, error)
 	encodeMessage  func(any) (websocket.MessageType, []byte, error)
 	printf         func(string, ...any)
 
 	nextConnectionID uint64
-	registrations    chan registration[ID, CLI, IM]
-	unregistrations  chan *Conn[ID, CLI, IM]
-	incomingInt      chan IncomingMessage[ID, CLI, IM]
+	registrations    chan registration[ID, IM]
+	unregistrations  chan *Conn[ID, IM]
+	incomingInt      chan IncomingMessage[ID, IM]
 	outgoingInt      chan any
 
-	connections    chan *Conn[ID, CLI, IM]
-	disconnections chan *Conn[ID, CLI, IM]
-	incoming       chan IncomingMessage[ID, CLI, IM]
+	connections    chan *Conn[ID, IM]
+	disconnections chan *Conn[ID, IM]
+	incoming       chan IncomingMessage[ID, IM]
 
-	roster *Roster[ID, CLI, IM]
+	roster *Roster[ID, IM]
 }
 
-type registration[ID comparable, CLI any, IM any] struct {
-	Conn   *Conn[ID, CLI, IM]
+type registration[ID comparable, IM any] struct {
+	Conn   *Conn[ID, IM]
 	Accept chan bool
 }
 
-type connectionOutgoingMessage[ID comparable, CLI any, IM any] struct {
-	Connection *Conn[ID, CLI, IM]
+type connectionOutgoingMessage[ID comparable, IM any] struct {
+	Connection *Conn[ID, IM]
 	Msg        any
 }
 
-type multiConnectionOutgoingMessage[ID comparable, CLI any, IM any] struct {
-	Connections []*Conn[ID, CLI, IM]
+type multiConnectionOutgoingMessage[ID comparable, IM any] struct {
+	Connections []*Conn[ID, IM]
 	Msg         any
 }
 
@@ -66,7 +66,7 @@ type multiClientOutgoingMessage[ID comparable] struct {
 	Msg       any
 }
 
-func New[ID comparable, CLI any, IM any](ctx context.Context, cfg *Config[ID, CLI, IM]) *Hub[ID, CLI, IM] {
+func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[ID, IM] {
 	acceptOptions := cfg.AcceptOptions
 	if acceptOptions == nil {
 		acceptOptions = defaultAcceptOptions
@@ -82,7 +82,7 @@ func New[ID comparable, CLI any, IM any](ctx context.Context, cfg *Config[ID, CL
 		logger = log.Printf
 	}
 
-	srv := &Hub[ID, CLI, IM]{
+	srv := &Hub[ID, IM]{
 		context:        ctx,
 		acceptOptions:  acceptOptions,
 		sendBufferSize: sbs,
@@ -93,26 +93,26 @@ func New[ID comparable, CLI any, IM any](ctx context.Context, cfg *Config[ID, CL
 		printf:         logger,
 
 		nextConnectionID: 0,
-		registrations:    make(chan registration[ID, CLI, IM]),
-		unregistrations:  make(chan *Conn[ID, CLI, IM]),
-		incomingInt:      make(chan IncomingMessage[ID, CLI, IM]),
+		registrations:    make(chan registration[ID, IM]),
+		unregistrations:  make(chan *Conn[ID, IM]),
+		incomingInt:      make(chan IncomingMessage[ID, IM]),
 		outgoingInt:      make(chan any),
 
-		connections:    make(chan *Conn[ID, CLI, IM]),
-		disconnections: make(chan *Conn[ID, CLI, IM]),
-		incoming:       make(chan IncomingMessage[ID, CLI, IM]),
+		connections:    make(chan *Conn[ID, IM]),
+		disconnections: make(chan *Conn[ID, IM]),
+		incoming:       make(chan IncomingMessage[ID, IM]),
 
-		roster: NewRoster[ID, CLI, IM](),
+		roster: NewRoster[ID, IM](),
 	}
 	return srv
 }
 
-func (s *Hub[ID, CLI, IM]) Start()                                        { go s.run() }
-func (s *Hub[ID, CLI, IM]) Connections() <-chan *Conn[ID, CLI, IM]        { return s.connections }
-func (s *Hub[ID, CLI, IM]) Disconnections() <-chan *Conn[ID, CLI, IM]     { return s.disconnections }
-func (s *Hub[ID, CLI, IM]) Incoming() <-chan IncomingMessage[ID, CLI, IM] { return s.incoming }
+func (s *Hub[ID, IM]) Start()                                   { go s.run() }
+func (s *Hub[ID, IM]) Connections() <-chan *Conn[ID, IM]        { return s.connections }
+func (s *Hub[ID, IM]) Disconnections() <-chan *Conn[ID, IM]     { return s.disconnections }
+func (s *Hub[ID, IM]) Incoming() <-chan IncomingMessage[ID, IM] { return s.incoming }
 
-func (s *Hub[ID, CLI, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
+func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	ws, err := websocket.Accept(w, r, s.acceptOptions)
 	if err != nil {
 		return
@@ -132,7 +132,7 @@ func (s *Hub[ID, CLI, IM]) HandleConnection(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	conn := &Conn[ID, CLI, IM]{
+	conn := &Conn[ID, IM]{
 		valid:        true,
 		context:      ctx,
 		cancel:       cancel,
@@ -154,7 +154,7 @@ func (s *Hub[ID, CLI, IM]) HandleConnection(w http.ResponseWriter, r *http.Reque
 	// Inform the main loop of the new connection
 	replyCh := make(chan bool, 1)
 
-	if err := sendContext(s.context, s.registrations, registration[ID, CLI, IM]{
+	if err := sendContext(s.context, s.registrations, registration[ID, IM]{
 		Conn:   conn,
 		Accept: replyCh,
 	}); err != nil {
@@ -176,7 +176,7 @@ func (s *Hub[ID, CLI, IM]) HandleConnection(w http.ResponseWriter, r *http.Reque
 	sendContext(s.context, s.unregistrations, conn)
 }
 
-func (s *Hub[ID, CLI, IM]) writePump(conn *Conn[ID, CLI, IM]) {
+func (s *Hub[ID, IM]) writePump(conn *Conn[ID, IM]) {
 	s.printf("Starting write pump for %s", conn)
 	defer s.printf("Exiting write pump for %s", conn)
 
@@ -199,7 +199,7 @@ func (s *Hub[ID, CLI, IM]) writePump(conn *Conn[ID, CLI, IM]) {
 	}
 }
 
-func (s *Hub[ID, CLI, IM]) readPump(conn *Conn[ID, CLI, IM]) {
+func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {
 	s.printf("Starting read pump for %s", conn)
 	defer s.printf("Exiting read pump for %s", conn)
 
@@ -214,7 +214,7 @@ func (s *Hub[ID, CLI, IM]) readPump(conn *Conn[ID, CLI, IM]) {
 			s.printf("Failed to decode message from %s: %s", conn, err)
 			return
 		} else {
-			sendContext(s.context, s.incomingInt, IncomingMessage[ID, CLI, IM]{
+			sendContext(s.context, s.incomingInt, IncomingMessage[ID, IM]{
 				ReceivedAt: time.Now(),
 				Conn:       conn,
 				Msg:        decoded,
@@ -223,7 +223,7 @@ func (s *Hub[ID, CLI, IM]) readPump(conn *Conn[ID, CLI, IM]) {
 	}
 }
 
-func (s *Hub[ID, CLI, IM]) run() {
+func (s *Hub[ID, IM]) run() {
 	defer s.cancelAllConnections()
 
 	for {
@@ -266,11 +266,11 @@ func (s *Hub[ID, CLI, IM]) run() {
 	}
 }
 
-func (s *Hub[ID, CLI, IM]) sendOutgoingMessage(og any) {
+func (s *Hub[ID, IM]) sendOutgoingMessage(og any) {
 	switch msg := og.(type) {
-	case connectionOutgoingMessage[ID, CLI, IM]:
+	case connectionOutgoingMessage[ID, IM]:
 		s.sendToConnection(msg.Connection, msg.Msg)
-	case multiConnectionOutgoingMessage[ID, CLI, IM]:
+	case multiConnectionOutgoingMessage[ID, IM]:
 		for _, conn := range msg.Connections {
 			s.sendToConnection(conn, msg.Msg)
 		}
@@ -283,13 +283,13 @@ func (s *Hub[ID, CLI, IM]) sendOutgoingMessage(og any) {
 	}
 }
 
-func (s *Hub[ID, CLI, IM]) sendToClient(client ID, msg any) {
+func (s *Hub[ID, IM]) sendToClient(client ID, msg any) {
 	for _, conn := range s.roster.clients[client] {
 		s.sendToConnection(conn, msg)
 	}
 }
 
-func (s *Hub[ID, CLI, IM]) sendToConnection(conn *Conn[ID, CLI, IM], msg any) {
+func (s *Hub[ID, IM]) sendToConnection(conn *Conn[ID, IM], msg any) {
 	if !s.isConnectionValid(conn) {
 		return
 	}
@@ -300,16 +300,16 @@ func (s *Hub[ID, CLI, IM]) sendToConnection(conn *Conn[ID, CLI, IM], msg any) {
 	}
 }
 
-func (s *Hub[ID, CLI, IM]) cancelAllConnections() {
+func (s *Hub[ID, IM]) cancelAllConnections() {
 
 }
 
-func (s *Hub[ID, CLI, IM]) cancelConnection(conn *Conn[ID, CLI, IM]) {
+func (s *Hub[ID, IM]) cancelConnection(conn *Conn[ID, IM]) {
 	conn.cancel()
 	conn.valid = false
 	s.roster.Remove(conn)
 }
 
-func (s *Hub[ID, CLI, IM]) isConnectionValid(conn *Conn[ID, CLI, IM]) bool {
+func (s *Hub[ID, IM]) isConnectionValid(conn *Conn[ID, IM]) bool {
 	return conn.valid
 }
