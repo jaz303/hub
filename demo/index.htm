@@ -1,0 +1,111 @@
+<!doctype html>
+
+<html>
+  <head>
+    <title>WSS Chat Example</title>
+    <script type="module">
+      const ui = {
+        connectWrapper: document.querySelector('#connect'),
+        username: document.querySelector('#connect input[name=username]'),
+        connect: document.querySelector('#connect button'),
+        chatWrapper: document.querySelector('#chat'),
+        chat: document.querySelector('#chat pre'),
+        message: document.querySelector('#chat input[name=message]'),
+        send: document.querySelector('#chat button')
+      }
+
+      let sock;
+      let connected = false;
+
+      function append(msg, sender) {
+        ui.chat.append(`<${sender}> ${msg}\n`);
+      }
+
+      function reset() {
+        ui.connectWrapper.style.display = '';
+        ui.username.value = '';
+        ui.chatWrapper.style.display = 'none';
+        ui.chat.textContent = '';
+        ui.message.value = '';
+      }
+
+      function connect(username) {
+        sock = new WebSocket('ws://localhost:8080/socket');
+        sock.onopen = () => {
+          sock.send(JSON.stringify({username: username}));
+          ui.connectWrapper.style.display = 'none';
+          ui.chatWrapper.style.display = '';
+          connected = username;
+        }
+        sock.onmessage = (evt) => {
+          const msg = JSON.parse(evt.data);
+          append(msg.message, msg.sender);
+        };
+        sock.onclose = () => {
+          console.log("Socket closed!");
+          reset();
+          connected = false;
+          sock = null;
+        };
+      }
+
+      function send() {
+        if (!connected) {
+          console.error("Not connected");
+          return;
+        }
+
+        const msg = ui.message.value.trim();
+        if (!msg) {
+          return;
+        }
+
+        ui.message.value = '';
+        
+        append(msg, connected);
+        sock.send(JSON.stringify({
+          message: msg
+        }));
+      }
+      
+      reset();
+
+      const params = new URLSearchParams(document.location.search);
+      if (params.get('username')) {
+        connect(params.get('username'));
+      }
+
+      ui.connect.onclick = () => {
+        if (connected) {
+          console.error("Already connected");
+          return;
+        }
+
+        const username = ui.username.value.trim();
+        if (!username) {
+          alert("Invalid username");
+          return;
+        }
+
+        connect(username);
+      }
+
+      ui.send.onclick = () => { send(); };
+      ui.message.onkeydown = (evt) => {
+        if (evt.which === 13) send();
+      }
+    </script>
+  </head>
+  <body>
+    <h1>Chat</h1>
+    <div id="connect">
+      <input type="text" name="username" placeholder="Username">
+      <button type="button">Connect</button>
+    </div>
+    <div id="chat">
+      <pre></pre>
+      <input type="text" name="message" placeholder="Message">
+      <button type="button">Send</button>
+    </div>
+  </body>
+</html>
