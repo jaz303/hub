@@ -12,15 +12,15 @@ import (
 	"nhooyr.io/websocket"
 )
 
-type Config = hub.Config[username, *chatMessage]
-type Roster = hub.Roster[username, *chatMessage]
-type Conn = hub.Conn[username, *chatMessage]
-
 type username string
 
 type user struct {
 	Username username
 }
+
+type Config = hub.Config[username, *chatMessage]
+type Roster = hub.Roster[username, *chatMessage]
+type Conn = hub.Conn[username, *chatMessage]
 
 type chatMessage struct {
 	SentAt  time.Time `json:"sentAt"`
@@ -53,6 +53,8 @@ func main() {
 		},
 
 		// Simple policy permitting a single connection per client
+		// In the event of a duplicate client ID, the existing client
+		// connection will be terminated.
 		Accept: func(conn *Conn, roster *Roster) (bool, []*Conn) {
 			return true, roster.ClientConnections(conn.ClientID())
 		},
