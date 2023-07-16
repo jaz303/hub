@@ -52,9 +52,16 @@ type Config[ID comparable, IM any] struct {
 }
 
 type Conn[ID comparable, IM any] struct {
-	valid        bool
-	context      context.Context
-	cancel       context.CancelFunc
+	// true if connection is valid
+	// This field is not threadsafe - only read/update from main hub goroutine
+	valid bool
+
+	// Connection context - derived from initial incoming request context.
+	// The connection will run until this context is cancelled; cancellation
+	// can happen anywhere
+	context context.Context
+	cancel  context.CancelFunc
+
 	connectionID uint64
 	clientID     ID
 	client       any

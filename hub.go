@@ -28,11 +28,11 @@ type Hub[ID comparable, IM any] struct {
 	encodeMessage  func(any) (websocket.MessageType, []byte, error)
 	printf         func(string, ...any)
 
-	nextConnectionID uint64
-	registrations    chan registration[ID, IM]
-	unregistrations  chan *Conn[ID, IM]
-	incomingInt      chan IncomingMessage[ID, IM]
-	outgoingInt      chan any
+	nextConnectionID  uint64
+	registrations     chan registration[ID, IM]
+	closedConnections chan *Conn[ID, IM]
+	incomingInt       chan IncomingMessage[ID, IM]
+	outgoingInt       chan any
 
 	connections    chan *Conn[ID, IM]
 	disconnections chan *Conn[ID, IM]
@@ -92,11 +92,11 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 		encodeMessage:  cfg.EncodeOutoingMessage,
 		printf:         logger,
 
-		nextConnectionID: 0,
-		registrations:    make(chan registration[ID, IM]),
-		unregistrations:  make(chan *Conn[ID, IM]),
-		incomingInt:      make(chan IncomingMessage[ID, IM]),
-		outgoingInt:      make(chan any),
+		nextConnectionID:  0,
+		registrations:     make(chan registration[ID, IM]),
+		closedConnections: make(chan *Conn[ID, IM]),
+		incomingInt:       make(chan IncomingMessage[ID, IM]),
+		outgoingInt:       make(chan any),
 
 		connections:    make(chan *Conn[ID, IM]),
 		disconnections: make(chan *Conn[ID, IM]),
@@ -170,10 +170,12 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read messages until the connection's context is cancelled
+	// Read messages until the connection's context is cancelled or an error occurs
 	s.readPump(conn)
+	cancel()
 
-	sendContext(s.context, s.unregistrations, conn)
+	// Relay the closed connection to the hub so it can be removed from the roster
+	sendContext(s.context, s.closedConnections, conn)
 }
 
 func (s *Hub[ID, IM]) writePump(conn *Conn[ID, IM]) {
@@ -230,26 +232,39 @@ func (s *Hub[ID, IM]) run() {
 		select {
 
 		case reg := <-s.registrations:
+			// Check that we can accept the connection - a connection may be denied
+			// based on policy. e.g. max one connection per unique client ID. The
+			// policy can also specify a list of connections that should be terminated,
+			// for example if the policy says max 1 connection per user but latest wins.
 			ok, removals := s.accept(reg.Conn, s.roster)
+
+			// Cancel connection for each terminated connection.
+			// This will send a disconnection notification for each removed connection
+			// to the application. It's important this happens before we send the
+			// connection notification so that the application does not observe
+			// a state inconsistent with its connection policy.
 			for _, conn := range removals {
 				s.cancelConnection(conn)
 			}
 
+			// If connection allowed, add to roster
 			if ok {
 				s.roster.Add(reg.Conn)
 			}
 
+			// Notify the connection loop of the result of the acceptance check - this
+			// will cause it to start its read/write pumps
 			reg.Accept <- ok
 
-			if err := sendContext(s.context, s.connections, reg.Conn); err != nil {
-				return
+			// If connection allowed, notify app of new connection
+			if ok {
+				if err := sendContext(s.context, s.connections, reg.Conn); err != nil {
+					return
+				}
 			}
 
-		case conn := <-s.unregistrations:
-			s.roster.Remove(conn)
-			if err := sendContext(s.context, s.disconnections, conn); err != nil {
-				return
-			}
+		case conn := <-s.closedConnections:
+			s.cancelConnection(conn)
 
 		case msg := <-s.incomingInt:
 			if err := sendContext(s.context, s.incoming, msg); err != nil {
@@ -305,9 +320,17 @@ func (s *Hub[ID, IM]) cancelAllConnections() {
 }
 
 func (s *Hub[ID, IM]) cancelConnection(conn *Conn[ID, IM]) {
-	conn.cancel()
+	if !conn.valid {
+		return
+	}
+
 	conn.valid = false
+	conn.cancel()
 	s.roster.Remove(conn)
+
+	if err := sendContext(s.context, s.disconnections, conn); err != nil {
+		return
+	}
 }
 
 func (s *Hub[ID, IM]) isConnectionValid(conn *Conn[ID, IM]) bool {
