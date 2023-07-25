@@ -38,7 +38,7 @@ type Config[ID comparable, IM any] struct {
 	// on failure.
 	// The callback must abort if the request's Context is cancelled
 	// before completion.
-	Authenticate func(uint64, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
+	Authenticate func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
 
 	// Callback to determine if a new, authenticated connection should be
 	// accepted for registration. Use this function to implement connection

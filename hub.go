@@ -23,7 +23,7 @@ type Hub[ID comparable, IM any] struct {
 	acceptOptions  *websocket.AcceptOptions
 	getCloseStatus func(cause int, err error) CloseStatus
 	sendBufferSize int
-	authenticate   func(uint64, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
+	authenticate   func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
 	accept         func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
 	decodeMessage  func(websocket.MessageType, []byte) (IM, error)
 	encodeMessage  func(any) (websocket.MessageType, []byte, error)
@@ -120,35 +120,19 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cid := atomic.AddUint64(&s.nextConnectionID, 1)
-
-	clientID, client, closeInfo := s.authenticate(cid, ws, r)
+	clientID, client, closeInfo := s.authenticate(s.context, ws, r)
 	if closeInfo.StatusCode > 0 {
 		ws.Close(closeInfo.StatusCode, closeInfo.Reason)
 		return
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
+	conn := s.makeConnection(r, clientID, client, ws)
 
-	conn := &Conn[ID, IM]{
-		valid:        true,
-		context:      ctx,
-		cancel:       cancel,
-		closeStatus:  make(chan CloseStatus, 1),
-		wg:           sync.WaitGroup{},
-		connectionID: cid,
-		clientID:     clientID,
-		client:       client,
-		sock:         ws,
-		outgoing:     make(chan any, s.sendBufferSize),
-	}
-
-	// Start the write pump
 	conn.wg.Add(1)
 	go func() {
 		s.writePump(conn)
 		conn.wg.Done()
-		cancel()
+		conn.cancel()
 	}()
 
 	defer func() {
@@ -161,9 +145,7 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		conn.sock.Close(cs.StatusCode, cs.Reason)
 	}()
 
-	// Inform the main loop of the new connection
 	replyCh := make(chan error)
-
 	if err := sendContext(s.context, s.registrations, registration[ID, IM]{
 		Conn:   conn,
 		Accept: replyCh,
@@ -186,6 +168,23 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	// read messages until the connection's context is cancelled or an error occurs
 	s.readPump(conn)
 	sendContext(s.context, s.closedConnections, conn)
+}
+
+func (s *Hub[ID, IM]) makeConnection(r *http.Request, clientID ID, clientInfo any, sock *websocket.Conn) *Conn[ID, IM] {
+	ctx, cancel := context.WithCancel(r.Context())
+
+	return &Conn[ID, IM]{
+		valid:        true,
+		context:      ctx,
+		cancel:       cancel,
+		closeStatus:  make(chan CloseStatus, 1),
+		wg:           sync.WaitGroup{},
+		connectionID: atomic.AddUint64(&s.nextConnectionID, 1),
+		clientID:     clientID,
+		client:       clientInfo,
+		sock:         sock,
+		outgoing:     make(chan any, s.sendBufferSize),
+	}
 }
 
 func (s *Hub[ID, IM]) writePump(conn *Conn[ID, IM]) {
