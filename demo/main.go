@@ -77,9 +77,7 @@ func main() {
 		// Simple policy permitting a single connection per client
 		// In the event of a duplicate client ID, the existing client
 		// connection will be terminated.
-		Accept: func(conn *Conn, roster *Roster) (bool, []*Conn) {
-			return true, roster.ClientConnections(conn.ClientID())
-		},
+		Accept: hub.LastWins[username, *chatMessage](),
 
 		// Incoming message decoder
 		// Takes an incoming WebSocket message and returns an instance of *chatMessage.
