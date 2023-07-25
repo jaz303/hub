@@ -73,6 +73,11 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 		acceptOptions = defaultAcceptOptions
 	}
 
+	getCloseStatus := cfg.GetCloseStatus
+	if cfg.GetCloseStatus == nil {
+		getCloseStatus = DefaultCloseStatus
+	}
+
 	sbs := cfg.SendBufferSize
 	if sbs <= 0 {
 		sbs = defaultSendBufferSize
@@ -86,7 +91,7 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 	srv := &Hub[ID, IM]{
 		context:        ctx,
 		acceptOptions:  acceptOptions,
-		getCloseStatus: DefaultCloseStatus,
+		getCloseStatus: getCloseStatus,
 		sendBufferSize: sbs,
 		authenticate:   cfg.Authenticate,
 		accept:         cfg.Accept,
@@ -121,7 +126,10 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientID, client, closeInfo := s.authenticate(s.context, ws, r)
-	if closeInfo.StatusCode > 0 {
+	if s.context.Err() != nil {
+		cs := s.getCloseStatus(HubShuttingDown, nil)
+		ws.Close(cs.StatusCode, cs.Reason)
+	} else if closeInfo.StatusCode > 0 {
 		ws.Close(closeInfo.StatusCode, closeInfo.Reason)
 		return
 	}
