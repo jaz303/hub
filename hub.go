@@ -21,9 +21,10 @@ const (
 type Hub[ID comparable, IM any] struct {
 	context        context.Context
 	acceptOptions  *websocket.AcceptOptions
+	getCloseStatus func(cause int, err error) CloseStatus
 	sendBufferSize int
-	authenticate   func(uint64, *websocket.Conn, *http.Request) (ID, any, websocket.StatusCode, string)
-	accept         func(conn *Conn[ID, IM], roster *Roster[ID, IM]) (bool, []*Conn[ID, IM])
+	authenticate   func(uint64, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
+	accept         func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
 	decodeMessage  func(websocket.MessageType, []byte) (IM, error)
 	encodeMessage  func(any) (websocket.MessageType, []byte, error)
 	printf         func(string, ...any)
@@ -43,7 +44,7 @@ type Hub[ID comparable, IM any] struct {
 
 type registration[ID comparable, IM any] struct {
 	Conn   *Conn[ID, IM]
-	Accept chan bool
+	Accept chan error
 }
 
 type connectionOutgoingMessage[ID comparable, IM any] struct {
@@ -85,6 +86,7 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 	srv := &Hub[ID, IM]{
 		context:        ctx,
 		acceptOptions:  acceptOptions,
+		getCloseStatus: DefaultCloseStatus,
 		sendBufferSize: sbs,
 		authenticate:   cfg.Authenticate,
 		accept:         cfg.Accept,
@@ -120,22 +122,20 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 
 	cid := atomic.AddUint64(&s.nextConnectionID, 1)
 
-	clientID, client, closeStatus, closeReason := s.authenticate(cid, ws, r)
-	if closeStatus > 0 {
-		ws.Close(closeStatus, closeReason)
+	clientID, client, closeInfo := s.authenticate(cid, ws, r)
+	if closeInfo.StatusCode > 0 {
+		ws.Close(closeInfo.StatusCode, closeInfo.Reason)
 		return
 	}
 
-	var wg sync.WaitGroup
-	defer wg.Wait()
-
 	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
 
 	conn := &Conn[ID, IM]{
 		valid:        true,
 		context:      ctx,
 		cancel:       cancel,
+		closeStatus:  make(chan CloseStatus, 1),
+		wg:           sync.WaitGroup{},
 		connectionID: cid,
 		clientID:     clientID,
 		client:       client,
@@ -144,37 +144,47 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Start the write pump
-	wg.Add(1)
+	conn.wg.Add(1)
 	go func() {
 		s.writePump(conn)
-		wg.Done()
+		conn.wg.Done()
 		cancel()
 	}()
 
+	defer func() {
+		conn.cancel()
+		conn.wg.Wait()
+		cs := conn.getCloseStatus()
+		if cs.StatusCode == 0 {
+			cs = s.getCloseStatus(0, nil)
+		}
+		conn.sock.Close(cs.StatusCode, cs.Reason)
+	}()
+
 	// Inform the main loop of the new connection
-	replyCh := make(chan bool, 1)
+	replyCh := make(chan error)
 
 	if err := sendContext(s.context, s.registrations, registration[ID, IM]{
 		Conn:   conn,
 		Accept: replyCh,
 	}); err != nil {
 		s.printf("Server context cancelled while sending %s registration, cancelling")
+		conn.trySetCloseStatus(s.getCloseStatus(HubShuttingDown, nil))
 		return
 	}
 
-	if res, err := recvContext(s.context, replyCh); err != nil {
+	if acceptErr, recvErr := recvContext(s.context, replyCh); recvErr != nil {
 		s.printf("Server context cancelled while waiting for %s registration result, cancelling", conn)
+		conn.trySetCloseStatus(s.getCloseStatus(HubShuttingDown, nil))
 		return
-	} else if !res {
+	} else if acceptErr != nil {
 		s.printf("New %s rejected by server, cancelling", conn)
+		conn.trySetCloseStatus(s.getCloseStatus(AcceptPolicyDenied, acceptErr))
 		return
 	}
 
-	// Read messages until the connection's context is cancelled or an error occurs
+	// read messages until the connection's context is cancelled or an error occurs
 	s.readPump(conn)
-	cancel()
-
-	// Relay the closed connection to the hub so it can be removed from the roster
 	sendContext(s.context, s.closedConnections, conn)
 }
 
@@ -188,9 +198,11 @@ func (s *Hub[ID, IM]) writePump(conn *Conn[ID, IM]) {
 		case og := <-conn.outgoing:
 			if encType, encData, err := s.encodeMessage(og); err != nil {
 				s.printf("Encode message failed for %s: %s", conn, err)
+				conn.trySetCloseStatus(s.getCloseStatus(EncodeOutgoingMessageFailed, err))
 				return
 			} else if err := conn.sock.Write(conn.context, encType, encData); err != nil {
 				s.printf("Write message to socket failed for %s: %s", conn, err)
+				conn.trySetCloseStatus(s.getCloseStatus(WriteOutgoingMessageFailed, err))
 				return
 			}
 
@@ -211,9 +223,11 @@ func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {
 			return // external cancellation
 		} else if err != nil {
 			s.printf("Failed to read message from %s: %s", conn, err)
+			conn.trySetCloseStatus(s.getCloseStatus(ReadIncomingMessageFailed, err))
 			return
 		} else if decoded, err := s.decodeMessage(msgType, msgData); err != nil {
 			s.printf("Failed to decode message from %s: %s", conn, err)
+			conn.trySetCloseStatus(s.getCloseStatus(DecodeIncomingMessageFailed, err))
 			return
 		} else {
 			sendContext(s.context, s.incomingInt, IncomingMessage[ID, IM]{
@@ -236,7 +250,7 @@ func (s *Hub[ID, IM]) run() {
 			// based on policy. e.g. max one connection per unique client ID. The
 			// policy can also specify a list of connections that should be terminated,
 			// for example if the policy says max 1 connection per user but latest wins.
-			ok, removals := s.accept(reg.Conn, s.roster)
+			removals, err := s.accept(reg.Conn, s.roster)
 
 			// Cancel connection for each terminated connection.
 			// This will send a disconnection notification for each removed connection
@@ -244,20 +258,21 @@ func (s *Hub[ID, IM]) run() {
 			// connection notification so that the application does not observe
 			// a state inconsistent with its connection policy.
 			for _, conn := range removals {
+				conn.trySetCloseStatus(s.getCloseStatus(ClosedByAcceptPolicy, nil))
 				s.cancelConnection(conn)
 			}
 
 			// If connection allowed, add to roster
-			if ok {
+			if err == nil {
 				s.roster.Add(reg.Conn)
 			}
 
 			// Notify the connection loop of the result of the acceptance check - this
 			// will cause it to start its read/write pumps
-			reg.Accept <- ok
+			reg.Accept <- err
 
 			// If connection allowed, notify app of new connection
-			if ok {
+			if err == nil {
 				if err := sendContext(s.context, s.connections, reg.Conn); err != nil {
 					return
 				}

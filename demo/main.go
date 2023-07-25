@@ -57,10 +57,10 @@ func main() {
 		//
 		// This is a dummy implementation that trusts the username supplied by the client.
 		// In reality we'd probably perform some sort of password verification here.
-		Authenticate: func(u uint64, c *websocket.Conn, r *http.Request) (username, any, websocket.StatusCode, string) {
+		Authenticate: func(u uint64, c *websocket.Conn, r *http.Request) (username, any, hub.CloseStatus) {
 			_, msgData, err := c.Read(r.Context())
 			if err != nil {
-				return "", nil, websocket.StatusInternalError, "auth-fail"
+				return "", nil, hub.MakeCloseStatus(websocket.StatusInternalError, "read error")
 			}
 
 			var authMsg = struct {
@@ -68,10 +68,10 @@ func main() {
 			}{}
 
 			if err := json.Unmarshal(msgData, &authMsg); err != nil {
-				return "", nil, websocket.StatusUnsupportedData, "auth-fail"
+				return "", nil, hub.MakeCloseStatus(websocket.StatusUnsupportedData, "failed to parse auth message")
 			}
 
-			return authMsg.Username, &user{Username: authMsg.Username}, 0, ""
+			return authMsg.Username, &user{Username: authMsg.Username}, hub.CloseStatus{}
 		},
 
 		// Simple policy permitting a single connection per client
