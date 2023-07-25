@@ -25,6 +25,8 @@ const (
 type Config[ID comparable, IM any] struct {
 	AcceptOptions *websocket.AcceptOptions
 
+	// Callback that returns a status code and reason based on the given
+	// cause of closure.
 	GetCloseStatus func(cause int, err error) CloseStatus
 
 	// Maximum number of outgoing messages that can be queued for
@@ -36,8 +38,14 @@ type Config[ID comparable, IM any] struct {
 	// websocket and HTTP request to authenticate the client, returning
 	// the user's credentials on success, and a non-zero close status/reason
 	// on failure.
-	// The callback must abort if the request's Context is cancelled
-	// before completion.
+	//
+	// The first argument is the server/hub context; the callback should abort
+	// if this context is cancelled before completion. In this situation it
+	// is not necessary to return a meaningful close status as one will be
+	// selected by the hub.
+	//
+	// If the HTTP request's context is cancelled it is the responsibility of
+	// the callback to provide a meaningful close status.
 	Authenticate func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
 
 	// Callback to determine if a new, authenticated connection should be
@@ -45,17 +53,18 @@ type Config[ID comparable, IM any] struct {
 	// policies for multiple instances of a single client ID, based on
 	// inspection of the provided Roster.
 	//
-	// First return value indicates whether conn should be registered with
-	// the server; a status code of zero means the connection is accepted,
-	// and any other value causes the connection to be closed with the given
-	// status code.
+	// First return value is a list of pre-existing connections
+	// that should be cancelled - this can be used, for example, to terminate
+	// any existing connections with a matching client ID.
 	//
-	// Second return value is a list of pre-existing connections
-	// that should be cancelled.
+	// Second return value indicates whether conn should be registered with
+	// the server; nil indicates that the connection is accepted, non-nil
+	// that it is rejected. The default close status generator uses the
+	// error's string representation as the socket close reason.
 	//
 	// This function is called from the server's main loop so should complete
-	// quickly. The provided Roster instance must not be stored elsewhere as it
-	// is not threadsafe.
+	// quickly. The provided Roster instance is valid for this invocation only
+	// and must not be retained for use elsewhere as it is not threadsafe.
 	Accept func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
 
 	// Decode an incoming message into an instance of IM
