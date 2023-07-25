@@ -20,6 +20,15 @@ over time.
 
 A fully commented chat example can be found at [demo/main.go](demo/main.go).
 
+To run:
+
+```shell
+go build -o demo github.com/jaz303/hub/demo
+./demo
+```
+
+You should now be able to run the demo by accessing `http://localhost:8080` in your browser. To auto-connect, append the `username` query param (e.g. `http://localhost:8080/?username=jason`).
+
 ## TODO
 
   - Ping/pong handlers
