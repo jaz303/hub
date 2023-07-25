@@ -96,10 +96,6 @@ func MakeCloseStatus(sc websocket.StatusCode, r string) CloseStatus {
 	}
 }
 
-func (cs CloseStatus) ok() bool {
-	return cs.StatusCode == 0
-}
-
 type Conn[ID comparable, IM any] struct {
 	// true if connection is valid
 	// This field is not threadsafe - only read/update from main hub goroutine
