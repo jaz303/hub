@@ -1,6 +1,23 @@
 # hub
 
-`hub` is a multi-user WebSocket hub based on [nhooyr.io/websocket](https://github.com/nhooyr/websocket).
+`hub` is a multi-user WebSocket hub based on [nhooyr.io/websocket](https://github.com/nhooyr/websocket) intended for use in chat-like/collaborative programs that need to support connections from multiple clients, and handle messages & connections events in a straightforward manner.
+
+`hub` provides a serialised view of server activity, exposing this through a simple channel-oriented interface. A simple integration boils down to a single loop:
+
+```golang
+for {
+    select {
+    case conn := <-server.Connections():
+        // handle new connection
+    case conn := <-server.Disconnections():
+        // handle new connection
+    case msg := <-server.Incoming():
+        // handle incoming message
+    }
+}
+```
+
+Behind the scenes `hub` manages all per-connection workflow and state, including authentication, active roster maintenance, incoming message parsing, and outgoing message queueing/encoding.
 
 `hub` features:
 
@@ -34,4 +51,4 @@ You should now be able to run the demo by accessing `http://localhost:8080` in y
   - Ping/pong handlers
   - Rate limiting for outgoing messages?
   - If a receiver can't keep up, is it worth having a policy option to close it, instead of stalling the program?
-  - Callback/notification when outgoing message written to socket
+  - Callback/notification when outgoing message written to socket (buffered channel)
