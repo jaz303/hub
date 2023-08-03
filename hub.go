@@ -338,7 +338,9 @@ func (s *Hub[ID, IM]) sendToConnection(conn *Conn[ID, IM], msg any) {
 }
 
 func (s *Hub[ID, IM]) cancelAllConnections() {
-
+	for _, conn := range s.roster.connections {
+		s.cancelConnection(conn)
+	}
 }
 
 func (s *Hub[ID, IM]) cancelConnection(conn *Conn[ID, IM]) {
