@@ -10,6 +10,7 @@ import (
 	"nhooyr.io/websocket"
 )
 
+// NullLogger discards its input
 func NullLogger(msg string, args ...any) {}
 
 const (
@@ -22,6 +23,7 @@ const (
 	HubShuttingDown
 )
 
+// Config defines a Hub's configuration.
 type Config[ID comparable, IM any] struct {
 	AcceptOptions *websocket.AcceptOptions
 
@@ -77,6 +79,8 @@ type Config[ID comparable, IM any] struct {
 	Logger func(string, ...any)
 }
 
+// DefaultCloseStatus provides a basic default mapping of cause
+// to close status.
 func DefaultCloseStatus(cause int, err error) CloseStatus {
 	switch cause {
 	case EncodeOutgoingMessageFailed,
@@ -93,11 +97,13 @@ func DefaultCloseStatus(cause int, err error) CloseStatus {
 	return MakeCloseStatus(websocket.StatusNormalClosure, "")
 }
 
+// CloseStatus represents a WebSocket close status code and reason
 type CloseStatus struct {
 	StatusCode websocket.StatusCode
 	Reason     string
 }
 
+// MakeCloseStatus is a helper function for creating a CloseStatus
 func MakeCloseStatus(sc websocket.StatusCode, r string) CloseStatus {
 	return CloseStatus{
 		StatusCode: sc,
@@ -105,6 +111,7 @@ func MakeCloseStatus(sc websocket.StatusCode, r string) CloseStatus {
 	}
 }
 
+// Conn represents a connection to the Hub
 type Conn[ID comparable, IM any] struct {
 	// true if connection is valid
 	// This field is not threadsafe - only read/update from main hub goroutine
@@ -132,9 +139,18 @@ func (c *Conn[ID, IM]) String() string {
 	return fmt.Sprintf("connection[id=%d, client=%v]", c.connectionID, c.clientID)
 }
 
+// ConnectionID returns the connection's unique ID
 func (c *Conn[ID, IM]) ConnectionID() uint64 { return c.connectionID }
-func (c *Conn[ID, IM]) ClientID() ID         { return c.clientID }
-func (c *Conn[ID, IM]) ClientInfo() any      { return c.client }
+
+// ClientID returns the client ID associated with this connection.
+// Depending on the Hub's multiple-client policy, multiple connections
+// with the same client ID may be allowed.
+func (c *Conn[ID, IM]) ClientID() ID { return c.clientID }
+
+// ClientInfo returns the client info associated with the connection,
+// as returned by the Authenticate callback. This value is not used
+// by Hub in any way.
+func (c *Conn[ID, IM]) ClientInfo() any { return c.client }
 
 func (c *Conn[ID, IM]) trySetCloseStatus(cs CloseStatus) bool {
 	select {
@@ -154,8 +170,9 @@ func (c *Conn[ID, IM]) getCloseStatus() CloseStatus {
 	}
 }
 
+// IncomingMessage represents a message received from a Hub connection.
 type IncomingMessage[ID comparable, IM any] struct {
-	ReceivedAt time.Time
-	Conn       *Conn[ID, IM]
-	Msg        IM
+	ReceivedAt time.Time     // Time message was received
+	Conn       *Conn[ID, IM] // Connection from which message was received
+	Msg        IM            // Decoded message
 }

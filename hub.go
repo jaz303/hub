@@ -67,6 +67,7 @@ type multiClientOutgoingMessage[ID comparable] struct {
 	Msg       any
 }
 
+// New creates a new Hub with the given config, and bound to the given context.
 func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[ID, IM] {
 	acceptOptions := cfg.AcceptOptions
 	if acceptOptions == nil {
@@ -114,11 +115,26 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 	return srv
 }
 
-func (s *Hub[ID, IM]) Start()                                   { go s.run() }
-func (s *Hub[ID, IM]) Connections() <-chan *Conn[ID, IM]        { return s.connections }
-func (s *Hub[ID, IM]) Disconnections() <-chan *Conn[ID, IM]     { return s.disconnections }
+// Start starts the Hub in the background; the Hub will continue running
+// until the context that was passed to New is cancelled.
+//
+// Once started, programs should read continuously from the Connections(),
+// Disconnections(), and Incoming() channels in order to prevent stalling.
+// Additionally, Start should be called before starting the HTTP server that
+// delegates connections to the Hub.
+func (s *Hub[ID, IM]) Start() { go s.run() }
+
+// Connections returns a channel that will receive each new Hub connection
+func (s *Hub[ID, IM]) Connections() <-chan *Conn[ID, IM] { return s.connections }
+
+// Connections returns a channel that will receive each Hub disconnection
+func (s *Hub[ID, IM]) Disconnections() <-chan *Conn[ID, IM] { return s.disconnections }
+
+// Incoming returns a channel that will receive messages received from the Hub's connections
 func (s *Hub[ID, IM]) Incoming() <-chan IncomingMessage[ID, IM] { return s.incoming }
 
+// HandleConnection is an http.HandlerFunc; integrations should route their
+// WebSocket endpoint to this method.
 func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	ws, err := websocket.Accept(w, r, s.acceptOptions)
 	if err != nil {
