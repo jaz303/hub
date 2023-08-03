@@ -1,8 +1,8 @@
 # hub
 
-`hub` is a multi-user WebSocket hub based on [nhooyr.io/websocket](https://github.com/nhooyr/websocket) intended for use in chat-like/collaborative programs that need to support connections from multiple clients, and handle messages & connections events in a straightforward manner.
+`hub` is a multi-user WebSocket hub based on [nhooyr.io/websocket](https://github.com/nhooyr/websocket) intended for use in chat-like/collaborative programs that need to support connections from multiple clients, and handle message/connection events in a straightforward manner.
 
-`hub` provides a serialised view of server activity, exposing this through a simple channel-oriented interface. A simple integration boils down to a single loop:
+`hub` provides a serialised view of server activity, exposing this through a simple channel-oriented interface. A basic integration can be achieved with a single loop:
 
 ```golang
 for {
