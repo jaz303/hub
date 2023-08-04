@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-// FirstWins creates a policy that permit a single connection per unique client ID.
+// FirstWins creates a policy that permits a single connection per unique client ID.
 // Any additional connections with the same client ID will be immediately disconnected.
 func FirstWins[ID comparable, IM any]() func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error) {
 	return func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error) {
@@ -15,7 +15,7 @@ func FirstWins[ID comparable, IM any]() func(conn *Conn[ID, IM], roster *Roster[
 	}
 }
 
-// LastWins creates a policy that permit a single connection per unique client ID.
+// LastWins creates a policy that permits a single connection per unique client ID.
 // Each additional connection with the same client ID will cause its predecessor to
 // be disconnected.
 func LastWins[ID comparable, IM any]() func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error) {
