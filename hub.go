@@ -243,7 +243,8 @@ func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {
 	for {
 		msgType, msgData, err := conn.sock.Read(conn.context)
 		if errors.Is(err, context.Canceled) {
-			return // external cancellation
+			s.printf("Read pump for %s exited due to context cancellation", conn)
+			return
 		} else if err != nil {
 			s.printf("Failed to read message from %s: %s", conn, err)
 			conn.trySetCloseStatus(s.getCloseStatus(ReadIncomingMessageFailed, err))
