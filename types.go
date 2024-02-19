@@ -21,11 +21,15 @@ const (
 	AcceptPolicyDenied
 	ClosedByAcceptPolicy
 	HubShuttingDown
+	PingFailed
 )
 
 // Config defines a Hub's configuration.
 type Config[ID comparable, IM any] struct {
 	AcceptOptions *websocket.AcceptOptions
+
+	// Set to non-zero value enable periodic ping from server -> client
+	PingInterval time.Duration
 
 	// Callback that returns a status code and reason based on the given
 	// cause of closure.

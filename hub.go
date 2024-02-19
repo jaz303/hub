@@ -23,6 +23,7 @@ type Hub[ID comparable, IM any] struct {
 	acceptOptions  *websocket.AcceptOptions
 	getCloseStatus func(cause int, err error) CloseStatus
 	sendBufferSize int
+	pingInterval   time.Duration
 	authenticate   func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
 	accept         func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
 	decodeMessage  func(websocket.MessageType, []byte) (IM, error)
@@ -84,6 +85,11 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 		sbs = defaultSendBufferSize
 	}
 
+	pi := cfg.PingInterval
+	if pi < 0 {
+		pi = 0
+	}
+
 	var logger = cfg.Logger
 	if logger == nil {
 		logger = log.Printf
@@ -94,6 +100,7 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 		acceptOptions:  acceptOptions,
 		getCloseStatus: getCloseStatus,
 		sendBufferSize: sbs,
+		pingInterval:   pi,
 		authenticate:   cfg.Authenticate,
 		accept:         cfg.Accept,
 		decodeMessage:  cfg.DecodeIncomingMessage,
@@ -215,6 +222,18 @@ func (s *Hub[ID, IM]) writePump(conn *Conn[ID, IM]) {
 	s.printf("Starting write pump for %s", conn)
 	defer s.printf("Exiting write pump for %s", conn)
 
+	var pingTimer *time.Timer
+	var nextPing <-chan time.Time
+	if s.pingInterval > 0 {
+		pingTimer = time.NewTimer(s.pingInterval)
+		nextPing = pingTimer.C
+		defer func() {
+			if !pingTimer.Stop() {
+				<-pingTimer.C
+			}
+		}()
+	}
+
 	for {
 		select {
 
@@ -228,6 +247,15 @@ func (s *Hub[ID, IM]) writePump(conn *Conn[ID, IM]) {
 				conn.trySetCloseStatus(s.getCloseStatus(WriteOutgoingMessageFailed, err))
 				return
 			}
+
+		case <-nextPing:
+			if err := conn.sock.Ping(conn.context); err != nil {
+				s.printf("Ping failed for %s: %s", conn, err)
+				conn.trySetCloseStatus(s.getCloseStatus(PingFailed, err))
+				return
+			}
+			pingTimer.Reset(s.pingInterval)
+			nextPing = pingTimer.C
 
 		case <-conn.context.Done():
 			return
