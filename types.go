@@ -139,6 +139,10 @@ func (c *Conn[ID, IM]) String() string {
 	return fmt.Sprintf("connection[id=%d, client=%v]", c.connectionID, c.clientID)
 }
 
+// Context() returns the context associated with this connection. The context
+// is valid until the connection terminates, at which point it will be cancelled.
+func (c *Conn[ID, IM]) Context() context.Context { return c.context }
+
 // ConnectionID returns the connection's unique ID
 func (c *Conn[ID, IM]) ConnectionID() uint64 { return c.connectionID }
 
