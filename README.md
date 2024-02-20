@@ -54,3 +54,7 @@ You should now be able to run the demo by accessing `http://localhost:8080` in y
   - Rate limiting for outgoing messages?
   - If a receiver can't keep up, is it worth having a policy option to close it, instead of stalling the program?
   - Callback/notification when outgoing message written to socket (buffered channel)
+
+# Copyright
+
+&copy; 2023-2024 Jason Frame
