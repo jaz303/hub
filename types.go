@@ -11,7 +11,7 @@ import (
 )
 
 // NullLogger discards its input
-func NullLogger(msg string, args ...any) {}
+func NullLogger(v ...any) {}
 
 const (
 	EncodeOutgoingMessageFailed = 1 + iota
@@ -26,6 +26,11 @@ const (
 
 // Config defines a Hub's configuration.
 type Config[ID comparable, IM any] struct {
+	// Tag is an arbitrary string used to identify this hub in log messages.
+	// Useful if the application creates multiple hubs.
+	// If unspecified, defaults to "hub"
+	Tag string
+
 	AcceptOptions *websocket.AcceptOptions
 
 	// Set to non-zero value enable periodic ping from server -> client
@@ -79,8 +84,8 @@ type Config[ID comparable, IM any] struct {
 	// Encode an outgoing message
 	EncodeOutoingMessage func(any) (websocket.MessageType, []byte, error)
 
-	// Logger - defaults to log.Printf(). Use hub.NullLogger to silence output.
-	Logger func(string, ...any)
+	// Logger - defaults to log.Println(). Use hub.NullLogger to silence output.
+	Logger func(...any)
 }
 
 // DefaultCloseStatus provides a basic default mapping of cause

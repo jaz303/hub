@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -15,11 +16,13 @@ import (
 var defaultAcceptOptions = &websocket.AcceptOptions{}
 
 const (
+	defaultTag            = "hub"
 	defaultSendBufferSize = 16
 )
 
 type Hub[ID comparable, IM any] struct {
 	context        context.Context
+	tag            string
 	acceptOptions  *websocket.AcceptOptions
 	getCloseStatus func(cause int, err error) CloseStatus
 	sendBufferSize int
@@ -28,7 +31,7 @@ type Hub[ID comparable, IM any] struct {
 	accept         func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
 	decodeMessage  func(websocket.MessageType, []byte) (IM, error)
 	encodeMessage  func(any) (websocket.MessageType, []byte, error)
-	printf         func(string, ...any)
+	logFn          func(...any)
 
 	nextConnectionID  uint64
 	registrations     chan registration[ID, IM]
@@ -70,6 +73,11 @@ type multiClientOutgoingMessage[ID comparable] struct {
 
 // New creates a new Hub with the given config, and bound to the given context.
 func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[ID, IM] {
+	tag := cfg.Tag
+	if tag == "" {
+		tag = defaultTag
+	}
+
 	acceptOptions := cfg.AcceptOptions
 	if acceptOptions == nil {
 		acceptOptions = defaultAcceptOptions
@@ -92,11 +100,12 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 
 	var logger = cfg.Logger
 	if logger == nil {
-		logger = log.Printf
+		logger = log.Println
 	}
 
 	srv := &Hub[ID, IM]{
 		context:        ctx,
+		tag:            fmt.Sprintf("[hub=%s]", tag),
 		acceptOptions:  acceptOptions,
 		getCloseStatus: getCloseStatus,
 		sendBufferSize: sbs,
@@ -105,7 +114,7 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 		accept:         cfg.Accept,
 		decodeMessage:  cfg.DecodeIncomingMessage,
 		encodeMessage:  cfg.EncodeOutoingMessage,
-		printf:         logger,
+		logFn:          logger,
 
 		nextConnectionID:  0,
 		registrations:     make(chan registration[ID, IM]),
@@ -423,4 +432,8 @@ func (s *Hub[ID, IM]) cancelConnection(conn *Conn[ID, IM]) {
 
 func (s *Hub[ID, IM]) isConnectionValid(conn *Conn[ID, IM]) bool {
 	return conn.valid
+}
+
+func (s *Hub[ID, IM]) printf(msg string, args ...any) {
+	s.logFn(s.tag, fmt.Sprintf(msg, args...))
 }
