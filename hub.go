@@ -178,6 +178,8 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		conn.sock.Close(cs.StatusCode, cs.Reason)
 	}()
 
+	s.printf("REGISTERING WITH HUB")
+
 	replyCh := make(chan error)
 	if err := sendContext(s.context, s.registrations, registration[ID, IM]{
 		Conn:   conn,
@@ -188,6 +190,8 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.printf("REGISTRATION SENT TO HUB OK, WAITING FOR REPLY")
+
 	if acceptErr, recvErr := recvContext(s.context, replyCh); recvErr != nil {
 		s.printf("Server context cancelled while waiting for %s registration result, cancelling", conn)
 		conn.trySetCloseStatus(s.getCloseStatus(HubShuttingDown, nil))
@@ -197,6 +201,8 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		conn.trySetCloseStatus(s.getCloseStatus(AcceptPolicyDenied, acceptErr))
 		return
 	}
+
+	s.printf("RECEIVED REGISTRATION RESPONSE")
 
 	// read messages until the connection's context is cancelled or an error occurs
 	s.readPump(conn)
