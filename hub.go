@@ -161,9 +161,11 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 
 	conn.wg.Add(1)
 	go func() {
+		defer func() {
+			conn.cancel()
+			conn.wg.Done()
+		}()
 		s.writePump(conn)
-		conn.wg.Done()
-		conn.cancel()
 	}()
 
 	defer func() {
