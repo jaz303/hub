@@ -341,7 +341,6 @@ func (s *Hub[ID, IM]) run() {
 			}
 
 		case og := <-s.outgoingInt:
-			s.printf("PICKED UP AN OUTGOING MESSAGE IN THE HUB")
 			s.sendOutgoingMessage(og)
 
 		case <-s.context.Done():
@@ -379,13 +378,9 @@ func (s *Hub[ID, IM]) sendToConnection(conn *Conn[ID, IM], msg any) {
 		return
 	}
 
-	s.printf("SENDING MESSAGE TO CONNECTION")
-
 	select {
 	case conn.outgoing <- msg:
-		s.printf("SENT OK")
 	case <-s.context.Done():
-		s.printf("SEND FAILED DUE TO CONTEXT CANCELLATION")
 	}
 }
 
