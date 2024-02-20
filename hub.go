@@ -178,8 +178,6 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		conn.sock.Close(cs.StatusCode, cs.Reason)
 	}()
 
-	s.printf("REGISTERING WITH HUB")
-
 	replyCh := make(chan error)
 	if err := sendContext(s.context, s.registrations, registration[ID, IM]{
 		Conn:   conn,
@@ -190,8 +188,6 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.printf("REGISTRATION SENT TO HUB OK, WAITING FOR REPLY")
-
 	if acceptErr, recvErr := recvContext(s.context, replyCh); recvErr != nil {
 		s.printf("Server context cancelled while waiting for %s registration result, cancelling", conn)
 		conn.trySetCloseStatus(s.getCloseStatus(HubShuttingDown, nil))
@@ -201,8 +197,6 @@ func (s *Hub[ID, IM]) HandleConnection(w http.ResponseWriter, r *http.Request) {
 		conn.trySetCloseStatus(s.getCloseStatus(AcceptPolicyDenied, acceptErr))
 		return
 	}
-
-	s.printf("RECEIVED REGISTRATION RESPONSE")
 
 	// read messages until the connection's context is cancelled or an error occurs
 	s.readPump(conn)
@@ -301,58 +295,75 @@ func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {
 
 func (s *Hub[ID, IM]) run() {
 	defer s.cancelAllConnections()
+	for s.context.Err() == nil {
+		s.tick()
+	}
+}
 
-	for {
-		select {
+func (s *Hub[ID, IM]) tick() {
+	defer func() {
+		if ex := recover(); ex != nil {
+			s.printf("hub tick recovered from error: %+v", ex)
+		}
+	}()
 
-		case reg := <-s.registrations:
-			// Check that we can accept the connection - a connection may be denied
-			// based on policy. e.g. max one connection per unique client ID. The
-			// policy can also specify a list of connections that should be terminated,
-			// for example if the policy says max 1 connection per user but latest wins.
-			removals, err := s.accept(reg.Conn, s.roster)
+	s.printf("HUB TICK!")
 
-			// Cancel connection for each terminated connection.
-			// This will send a disconnection notification for each removed connection
-			// to the application. It's important this happens before we send the
-			// connection notification so that the application does not observe
-			// a state inconsistent with its connection policy.
-			for _, conn := range removals {
-				conn.trySetCloseStatus(s.getCloseStatus(ClosedByAcceptPolicy, nil))
-				s.cancelConnection(conn)
-			}
+	select {
 
-			// If connection allowed, add to roster
-			if err == nil {
-				s.roster.Add(reg.Conn)
-			}
+	case reg := <-s.registrations:
+		s.printf("> REGISTRATION")
 
-			// Notify the connection loop of the result of the acceptance check - this
-			// will cause it to start its read/write pumps
-			reg.Accept <- err
+		// Check that we can accept the connection - a connection may be denied
+		// based on policy. e.g. max one connection per unique client ID. The
+		// policy can also specify a list of connections that should be terminated,
+		// for example if the policy says max 1 connection per user but latest wins.
+		removals, err := s.accept(reg.Conn, s.roster)
 
-			// If connection allowed, notify app of new connection
-			if err == nil {
-				if err := sendContext(s.context, s.connections, reg.Conn); err != nil {
-					return
-				}
-			}
-
-		case conn := <-s.closedConnections:
+		// Cancel connection for each terminated connection.
+		// This will send a disconnection notification for each removed connection
+		// to the application. It's important this happens before we send the
+		// connection notification so that the application does not observe
+		// a state inconsistent with its connection policy.
+		for _, conn := range removals {
+			conn.trySetCloseStatus(s.getCloseStatus(ClosedByAcceptPolicy, nil))
 			s.cancelConnection(conn)
+		}
 
-		case msg := <-s.incomingInt:
-			if err := sendContext(s.context, s.incoming, msg); err != nil {
+		// If connection allowed, add to roster
+		if err == nil {
+			s.roster.Add(reg.Conn)
+		}
+
+		// Notify the connection loop of the result of the acceptance check - this
+		// will cause it to start its read/write pumps
+		reg.Accept <- err
+
+		// If connection allowed, notify app of new connection
+		if err == nil {
+			if err := sendContext(s.context, s.connections, reg.Conn); err != nil {
 				return
 			}
-
-		case og := <-s.outgoingInt:
-			s.sendOutgoingMessage(og)
-
-		case <-s.context.Done():
-			return
-
 		}
+
+	case conn := <-s.closedConnections:
+		s.printf("> CLOSED CONNECTION")
+		s.cancelConnection(conn)
+
+	case msg := <-s.incomingInt:
+		s.printf("> INCOMING")
+		if err := sendContext(s.context, s.incoming, msg); err != nil {
+			return
+		}
+
+	case og := <-s.outgoingInt:
+		s.printf("> OUTGOING")
+		s.sendOutgoingMessage(og)
+
+	case <-s.context.Done():
+		s.printf("> CONTEXT CANCELLED")
+		return
+
 	}
 }
 
