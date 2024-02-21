@@ -1,6 +1,9 @@
 package hub
 
-import "context"
+import (
+	"context"
+	"reflect"
+)
 
 func recvContext[E any](ctx context.Context, src <-chan E) (E, error) {
 	var zero E
@@ -41,4 +44,11 @@ func removeFirstMatch[E comparable](slice []E, val E) []E {
 		}
 	}
 	return slice
+}
+
+func orDefault[T any](v T, defaultValue T) T {
+	if reflect.ValueOf(v).IsZero() {
+		return defaultValue
+	}
+	return v
 }

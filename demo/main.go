@@ -95,16 +95,11 @@ func main() {
 			return &msg, nil
 		},
 
-		// Outgoing message encoder
-		// Takes an object representing an outgoing message and returns a WebSocket-
-		// compatible encoding.
-		EncodeOutoingMessage: func(a any) (websocket.MessageType, []byte, error) {
-			jb, err := json.Marshal(a)
-			if err != nil {
-				return 0, nil, err
-			}
-			return websocket.MessageText, jb, nil
-		},
+		// All outgoing messages are text
+		OutgoingMessageType: hub.Text,
+
+		// All outgoing messages are JSON
+		WriteOutoingMessage: hub.WriteJSON,
 	}
 
 	// Create the hub and start it in the background

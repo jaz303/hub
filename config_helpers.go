@@ -1,7 +1,11 @@
 package hub
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+
+	"nhooyr.io/websocket"
 )
 
 // FirstWins creates a policy that permits a single connection per unique client ID.
@@ -31,3 +35,8 @@ func MultipleClientConnectionsAllowed[ID comparable, IM any]() func(conn *Conn[I
 		return nil, nil
 	}
 }
+
+func Binary(v any) (websocket.MessageType, error) { return websocket.MessageBinary, nil }
+func Text(v any) (websocket.MessageType, error)   { return websocket.MessageText, nil }
+
+func WriteJSON(dst io.Writer, msg any) error { return json.NewEncoder(dst).Encode(msg) }

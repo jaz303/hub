@@ -22,17 +22,18 @@ const (
 )
 
 type Hub[ID comparable, IM any] struct {
-	context        context.Context
-	tag            string
-	acceptOptions  *websocket.AcceptOptions
-	getCloseStatus func(cause int, err error) CloseStatus
-	sendBufferSize int
-	pingInterval   time.Duration
-	authenticate   func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
-	accept         func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
-	decodeMessage  func(websocket.MessageType, io.Reader) (IM, error)
-	encodeMessage  func(any) (websocket.MessageType, []byte, error)
-	logFn          func(...any)
+	context              context.Context
+	tag                  string
+	acceptOptions        *websocket.AcceptOptions
+	getCloseStatus       func(cause int, err error) CloseStatus
+	sendBufferSize       int
+	pingInterval         time.Duration
+	authenticate         func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
+	accept               func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
+	decodeMessage        func(websocket.MessageType, io.Reader) (IM, error)
+	outgoingMessageType  func(any) (websocket.MessageType, error)
+	writeOutgoingMessage func(io.Writer, any) error
+	logFn                func(...any)
 
 	nextConnectionID  uint64
 	registrations     chan registration[ID, IM]
@@ -74,48 +75,19 @@ type multiClientOutgoingMessage[ID comparable] struct {
 
 // New creates a new Hub with the given config, and bound to the given context.
 func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[ID, IM] {
-	tag := cfg.Tag
-	if tag == "" {
-		tag = defaultTag
-	}
-
-	acceptOptions := cfg.AcceptOptions
-	if acceptOptions == nil {
-		acceptOptions = defaultAcceptOptions
-	}
-
-	getCloseStatus := cfg.GetCloseStatus
-	if cfg.GetCloseStatus == nil {
-		getCloseStatus = DefaultCloseStatus
-	}
-
-	sbs := cfg.SendBufferSize
-	if sbs <= 0 {
-		sbs = defaultSendBufferSize
-	}
-
-	pi := cfg.PingInterval
-	if pi < 0 {
-		pi = 0
-	}
-
-	var logger = cfg.Logger
-	if logger == nil {
-		logger = log.Println
-	}
-
 	srv := &Hub[ID, IM]{
-		context:        ctx,
-		tag:            fmt.Sprintf("[hub=%s]", tag),
-		acceptOptions:  acceptOptions,
-		getCloseStatus: getCloseStatus,
-		sendBufferSize: sbs,
-		pingInterval:   pi,
-		authenticate:   cfg.Authenticate,
-		accept:         cfg.Accept,
-		decodeMessage:  cfg.DecodeIncomingMessage,
-		encodeMessage:  cfg.EncodeOutoingMessage,
-		logFn:          logger,
+		context:              ctx,
+		tag:                  fmt.Sprintf("[hub=%s]", orDefault(cfg.Tag, defaultTag)),
+		acceptOptions:        orDefault(cfg.AcceptOptions, defaultAcceptOptions),
+		getCloseStatus:       orDefault(cfg.GetCloseStatus, DefaultCloseStatus),
+		sendBufferSize:       orDefault(cfg.SendBufferSize, defaultSendBufferSize),
+		pingInterval:         orDefault(cfg.PingInterval, 0),
+		authenticate:         cfg.Authenticate,
+		accept:               cfg.Accept,
+		decodeMessage:        cfg.DecodeIncomingMessage,
+		outgoingMessageType:  orDefault(cfg.OutgoingMessageType, Text),
+		writeOutgoingMessage: orDefault(cfg.WriteOutoingMessage, WriteJSON),
+		logFn:                orDefault(cfg.Logger, log.Println),
 
 		nextConnectionID:  0,
 		registrations:     make(chan registration[ID, IM]),
@@ -250,13 +222,9 @@ func (s *Hub[ID, IM]) writePump(conn *Conn[ID, IM]) {
 		select {
 
 		case og := <-conn.outgoing:
-			if encType, encData, err := s.encodeMessage(og); err != nil {
-				s.printf("Encode message failed for %s: %s", conn, err)
-				conn.trySetCloseStatus(s.getCloseStatus(EncodeOutgoingMessageFailed, err))
-				return
-			} else if err := conn.sock.Write(conn.context, encType, encData); err != nil {
-				s.printf("Write message to socket failed for %s: %s", conn, err)
-				conn.trySetCloseStatus(s.getCloseStatus(WriteOutgoingMessageFailed, err))
+			closeStatus, err := s.writeOneMessage(conn, og)
+			if err != nil {
+				conn.trySetCloseStatus(s.getCloseStatus(closeStatus, err))
 				return
 			}
 
@@ -274,6 +242,29 @@ func (s *Hub[ID, IM]) writePump(conn *Conn[ID, IM]) {
 
 		}
 	}
+}
+
+func (s *Hub[ID, IM]) writeOneMessage(conn *Conn[ID, IM], msg any) (int, error) {
+	msgType, err := s.outgoingMessageType(msg)
+	if err != nil {
+		s.printf("Failed to get message type for outgoing message on %s: %s", conn, err)
+		return EncodeOutgoingMessageFailed, err
+	}
+
+	writer, err := conn.sock.Writer(conn.context, msgType)
+	if err != nil {
+		s.printf("Failed to acquire writer for outgoing message on %s: %s", conn, err)
+		return WriteOutgoingMessageFailed, err
+	}
+
+	defer writer.Close()
+
+	if err := s.writeOutgoingMessage(writer, msg); err != nil {
+		s.printf("Write message to socket failed on %s: %s", conn, err)
+		return WriteOutgoingMessageFailed, err
+	}
+
+	return 0, nil
 }
 
 func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {

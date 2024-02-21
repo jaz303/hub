@@ -85,8 +85,11 @@ type Config[ID comparable, IM any] struct {
 	// Decode an incoming message into an instance of IM
 	DecodeIncomingMessage func(websocket.MessageType, io.Reader) (IM, error)
 
-	// Encode an outgoing message
-	EncodeOutoingMessage func(any) (websocket.MessageType, []byte, error)
+	// Get the websocket message type for the outgoing message
+	OutgoingMessageType func(any) (websocket.MessageType, error)
+
+	// Write an outgoing message
+	WriteOutoingMessage func(io.Writer, any) error
 
 	// Logger - defaults to log.Println(). Use hub.NullLogger to silence output.
 	Logger func(...any)
