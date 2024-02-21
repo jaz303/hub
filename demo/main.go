@@ -142,7 +142,7 @@ func main() {
 			for c := range activeConnections {
 				// Send message to every connection except sender.
 				// In a more robust implementation we'd probably send to
-				// the sender as well and include sequence numbers so the
+				// the sender as well and include sequence numbers so
 				// everyone can see the same "true" order of messages.
 				if c != inc.Conn {
 					srv.SendToConnection(c, &inc.Msg)
