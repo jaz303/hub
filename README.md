@@ -50,7 +50,6 @@ You should now be able to run the demo by accessing `http://localhost:8080` in y
 
 ## TODO
 
-  - Ping/pong handlers
   - Rate limiting for outgoing messages?
   - If a receiver can't keep up, is it worth having a policy option to close it, instead of stalling the program?
   - Callback/notification when outgoing message written to socket (buffered channel)
