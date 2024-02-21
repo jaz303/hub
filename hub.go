@@ -86,7 +86,7 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 		accept:               cfg.Accept,
 		decodeMessage:        cfg.DecodeIncomingMessage,
 		outgoingMessageType:  orDefault(cfg.OutgoingMessageType, Text),
-		writeOutgoingMessage: orDefault(cfg.WriteOutoingMessage, WriteJSON),
+		writeOutgoingMessage: orDefault(cfg.WriteOutgoingMessage, WriteJSON),
 		logFn:                orDefault(cfg.Logger, log.Println),
 
 		nextConnectionID:  0,

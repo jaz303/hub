@@ -89,7 +89,7 @@ type Config[ID comparable, IM any] struct {
 	OutgoingMessageType func(any) (websocket.MessageType, error)
 
 	// Write an outgoing message
-	WriteOutoingMessage func(io.Writer, any) error
+	WriteOutgoingMessage func(io.Writer, any) error
 
 	// Logger - defaults to log.Println(). Use hub.NullLogger to silence output.
 	Logger func(...any)

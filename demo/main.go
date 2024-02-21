@@ -99,7 +99,7 @@ func main() {
 		OutgoingMessageType: hub.Text,
 
 		// All outgoing messages are JSON
-		WriteOutoingMessage: hub.WriteJSON,
+		WriteOutgoingMessage: hub.WriteJSON,
 	}
 
 	// Create the hub and start it in the background
