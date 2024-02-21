@@ -106,7 +106,7 @@ func main() {
 	srv := hub.New(context.Background(), &cfg)
 	srv.Start()
 
-	// Register a handler for incominbg socket connections, routed to hub's handler.
+	// Register a handler for incoming socket connections, routed to hub's handler.
 	http.HandleFunc("/socket", srv.HandleConnection)
 
 	// Static page for test UI
