@@ -51,6 +51,8 @@ func main() {
 		// policies for slow clients.
 		SendBufferSize: 32,
 
+		Tag: "demo",
+
 		// Authentication handler.
 		//
 		// On success, returns the client ID (username) and client info (user struct)
