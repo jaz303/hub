@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -12,6 +13,8 @@ import (
 
 // NullLogger discards its input
 func NullLogger(v ...any) {}
+
+var ErrSkipMessage = errors.New("skip")
 
 const (
 	EncodeOutgoingMessageFailed = 1 + iota

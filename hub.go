@@ -288,7 +288,9 @@ func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {
 			s.printf("Failed to read message from %s: %s", conn, err)
 			conn.trySetCloseStatus(s.getCloseStatus(ReadIncomingMessageFailed, err))
 			return
-		} else if decoded, err := s.decodeMessage(msgType, msgData); err != nil {
+		} else if decoded, err := s.decodeMessage(msgType, msgData); errors.Is(err, ErrSkipMessage) {
+			// nothing to do - decoder requested message be skipped
+		} else if err != nil {
 			s.printf("Failed to decode message from %s: %s", conn, err)
 			conn.trySetCloseStatus(s.getCloseStatus(DecodeIncomingMessageFailed, err))
 			return
