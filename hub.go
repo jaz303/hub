@@ -323,13 +323,9 @@ func (s *Hub[ID, IM]) tick() {
 		}
 	}()
 
-	s.printf("HUB TICK!")
-
 	select {
 
 	case reg := <-s.registrations:
-		s.printf("> REGISTRATION")
-
 		// Check that we can accept the connection - a connection may be denied
 		// based on policy. e.g. max one connection per unique client ID. The
 		// policy can also specify a list of connections that should be terminated,
@@ -363,21 +359,17 @@ func (s *Hub[ID, IM]) tick() {
 		}
 
 	case conn := <-s.closedConnections:
-		s.printf("> CLOSED CONNECTION")
 		s.cancelConnection(conn)
 
 	case msg := <-s.incomingInt:
-		s.printf("> INCOMING")
 		if err := sendContext(s.context, s.incoming, msg); err != nil {
 			return
 		}
 
 	case og := <-s.outgoingInt:
-		s.printf("> OUTGOING")
 		s.sendOutgoingMessage(og)
 
 	case <-s.context.Done():
-		s.printf("> CONTEXT CANCELLED")
 		return
 
 	}
