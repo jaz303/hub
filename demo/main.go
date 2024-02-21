@@ -84,7 +84,7 @@ func main() {
 
 		// Incoming message decoder
 		// Takes an incoming WebSocket message and returns an instance of *chatMessage.
-		DecodeIncomingMessage: func(mt websocket.MessageType, r io.Reader) (*chatMessage, error) {
+		ReadIncomingMessage: func(mt websocket.MessageType, r io.Reader) (*chatMessage, error) {
 			if mt != websocket.MessageText {
 				return nil, fmt.Errorf("received message of unexpected type %d", mt)
 			}

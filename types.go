@@ -83,7 +83,7 @@ type Config[ID comparable, IM any] struct {
 	Accept func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
 
 	// Decode an incoming message into an instance of IM
-	DecodeIncomingMessage func(websocket.MessageType, io.Reader) (IM, error)
+	ReadIncomingMessage func(websocket.MessageType, io.Reader) (IM, error)
 
 	// Get the websocket message type for the outgoing message
 	OutgoingMessageType func(any) (websocket.MessageType, error)

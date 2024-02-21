@@ -30,7 +30,7 @@ type Hub[ID comparable, IM any] struct {
 	pingInterval         time.Duration
 	authenticate         func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
 	accept               func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
-	decodeMessage        func(websocket.MessageType, io.Reader) (IM, error)
+	readMessage          func(websocket.MessageType, io.Reader) (IM, error)
 	outgoingMessageType  func(any) (websocket.MessageType, error)
 	writeOutgoingMessage func(io.Writer, any) error
 	logFn                func(...any)
@@ -84,7 +84,7 @@ func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[I
 		pingInterval:         orDefault(cfg.PingInterval, 0),
 		authenticate:         cfg.Authenticate,
 		accept:               cfg.Accept,
-		decodeMessage:        cfg.DecodeIncomingMessage,
+		readMessage:          cfg.ReadIncomingMessage,
 		outgoingMessageType:  orDefault(cfg.OutgoingMessageType, Text),
 		writeOutgoingMessage: orDefault(cfg.WriteOutgoingMessage, WriteJSON),
 		logFn:                orDefault(cfg.Logger, log.Println),
@@ -282,7 +282,7 @@ func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {
 			return
 		}
 
-		decoded, err := s.decodeMessage(msgType, reader)
+		decoded, err := s.readMessage(msgType, reader)
 		skip := errors.Is(err, ErrSkipMessage)
 
 		if err != nil && !skip {
