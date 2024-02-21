@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -29,7 +30,7 @@ type Hub[ID comparable, IM any] struct {
 	pingInterval   time.Duration
 	authenticate   func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
 	accept         func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
-	decodeMessage  func(websocket.MessageType, []byte) (IM, error)
+	decodeMessage  func(websocket.MessageType, io.Reader) (IM, error)
 	encodeMessage  func(any) (websocket.MessageType, []byte, error)
 	logFn          func(...any)
 
@@ -280,21 +281,34 @@ func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {
 	defer s.printf("Exiting read pump for %s", conn)
 
 	for {
-		msgType, msgData, err := conn.sock.Read(conn.context)
+		msgType, reader, err := conn.sock.Reader(conn.context)
 		if errors.Is(err, context.Canceled) {
 			s.printf("Read pump for %s exited due to context cancellation", conn)
 			return
 		} else if err != nil {
-			s.printf("Failed to read message from %s: %s", conn, err)
+			s.printf("Failed to acquire message reader for %s: %s", conn, err)
 			conn.trySetCloseStatus(s.getCloseStatus(ReadIncomingMessageFailed, err))
 			return
-		} else if decoded, err := s.decodeMessage(msgType, msgData); errors.Is(err, ErrSkipMessage) {
-			// nothing to do - decoder requested message be skipped
-		} else if err != nil {
+		}
+
+		decoded, err := s.decodeMessage(msgType, reader)
+		skip := errors.Is(err, ErrSkipMessage)
+
+		if err != nil && !skip {
 			s.printf("Failed to decode message from %s: %s", conn, err)
 			conn.trySetCloseStatus(s.getCloseStatus(DecodeIncomingMessageFailed, err))
 			return
-		} else {
+		}
+
+		// There's no guarantee that decodeMessage() read the entire message so
+		// drain the rest of the input.
+		if _, err := io.Copy(io.Discard, reader); err != nil {
+			s.printf("Failed to discard message tail from %s: %s", conn, err)
+			conn.trySetCloseStatus(s.getCloseStatus(ReadIncomingMessageFailed, err))
+			return
+		}
+
+		if !skip {
 			sendContext(s.context, s.incomingInt, IncomingMessage[ID, IM]{
 				ReceivedAt: time.Now(),
 				Conn:       conn,

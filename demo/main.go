@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -81,12 +82,12 @@ func main() {
 
 		// Incoming message decoder
 		// Takes an incoming WebSocket message and returns an instance of *chatMessage.
-		DecodeIncomingMessage: func(mt websocket.MessageType, b []byte) (*chatMessage, error) {
+		DecodeIncomingMessage: func(mt websocket.MessageType, r io.Reader) (*chatMessage, error) {
 			if mt != websocket.MessageText {
 				return nil, fmt.Errorf("received message of unexpected type %d", mt)
 			}
 			msg := chatMessage{}
-			if err := json.Unmarshal(b, &msg); err != nil {
+			if err := json.NewDecoder(r).Decode(&msg); err != nil {
 				return nil, err
 			}
 			return &msg, nil
