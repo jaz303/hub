@@ -24,17 +24,6 @@ func sendContext[E any](ctx context.Context, dst chan<- E, val E) error {
 	}
 }
 
-func sendContext2[E any](ctx1 context.Context, ctx2 context.Context, dst chan<- E, val E) error {
-	select {
-	case <-ctx1.Done():
-		return ctx1.Err()
-	case <-ctx2.Done():
-		return ctx2.Err()
-	case dst <- val:
-		return nil
-	}
-}
-
 func removeFirstMatch[E comparable](slice []E, val E) []E {
 	last := len(slice) - 1
 	for i := range slice {
@@ -47,8 +36,17 @@ func removeFirstMatch[E comparable](slice []E, val E) []E {
 }
 
 func orDefault[T any](v T, defaultValue T) T {
-	if reflect.ValueOf(v).IsZero() {
+	ref := reflect.ValueOf(v)
+	if !ref.IsValid() || ref.IsZero() {
 		return defaultValue
+	}
+	return v
+}
+
+func orDefaultLazy[T any](v T, defaultValue func() T) T {
+	ref := reflect.ValueOf(v)
+	if !ref.IsValid() || ref.IsZero() {
+		return defaultValue()
 	}
 	return v
 }

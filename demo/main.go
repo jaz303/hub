@@ -49,7 +49,7 @@ func main() {
 		// stall the outer program.
 		// Future versions of hub will support rate limiting and forced-disconnection
 		// policies for slow clients.
-		SendBufferSize: 32,
+		PerConnectionSendBufferSize: 32,
 
 		Tag: "demo",
 

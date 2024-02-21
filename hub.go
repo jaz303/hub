@@ -22,24 +22,24 @@ const (
 )
 
 type Hub[ID comparable, IM any] struct {
-	context              context.Context
-	tag                  string
-	acceptOptions        *websocket.AcceptOptions
-	getCloseStatus       func(cause int, err error) CloseStatus
-	sendBufferSize       int
-	pingInterval         time.Duration
-	authenticate         func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
-	accept               func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
-	readMessage          func(websocket.MessageType, io.Reader) (IM, error)
-	outgoingMessageType  func(any) (websocket.MessageType, error)
-	writeOutgoingMessage func(io.Writer, any) error
-	logFn                func(...any)
+	context                 context.Context
+	tag                     string
+	acceptOptions           *websocket.AcceptOptions
+	getCloseStatus          func(cause int, err error) CloseStatus
+	sendQueue               SendQueue
+	perConnectionBufferSize int
+	pingInterval            time.Duration
+	authenticate            func(context.Context, *websocket.Conn, *http.Request) (ID, any, CloseStatus)
+	accept                  func(conn *Conn[ID, IM], roster *Roster[ID, IM]) ([]*Conn[ID, IM], error)
+	readMessage             func(websocket.MessageType, io.Reader) (IM, error)
+	outgoingMessageType     func(any) (websocket.MessageType, error)
+	writeOutgoingMessage    func(io.Writer, any) error
+	logFn                   func(...any)
 
 	nextConnectionID  uint64
 	registrations     chan registration[ID, IM]
 	closedConnections chan *Conn[ID, IM]
 	incomingInt       chan IncomingMessage[ID, IM]
-	outgoingInt       chan any
 
 	connections    chan *Conn[ID, IM]
 	disconnections chan *Conn[ID, IM]
@@ -53,47 +53,29 @@ type registration[ID comparable, IM any] struct {
 	Accept chan error
 }
 
-type connectionOutgoingMessage[ID comparable, IM any] struct {
-	Connection *Conn[ID, IM]
-	Msg        any
-}
-
-type multiConnectionOutgoingMessage[ID comparable, IM any] struct {
-	Connections []*Conn[ID, IM]
-	Msg         any
-}
-
-type clientOutgoingMessage[ID comparable] struct {
-	ClientID ID
-	Msg      any
-}
-
-type multiClientOutgoingMessage[ID comparable] struct {
-	ClientIDs []ID
-	Msg       any
-}
-
 // New creates a new Hub with the given config, and bound to the given context.
 func New[ID comparable, IM any](ctx context.Context, cfg *Config[ID, IM]) *Hub[ID, IM] {
 	srv := &Hub[ID, IM]{
-		context:              ctx,
-		tag:                  fmt.Sprintf("[hub=%s]", orDefault(cfg.Tag, defaultTag)),
-		acceptOptions:        orDefault(cfg.AcceptOptions, defaultAcceptOptions),
-		getCloseStatus:       orDefault(cfg.GetCloseStatus, DefaultCloseStatus),
-		sendBufferSize:       orDefault(cfg.SendBufferSize, defaultSendBufferSize),
-		pingInterval:         orDefault(cfg.PingInterval, 0),
-		authenticate:         cfg.Authenticate,
-		accept:               cfg.Accept,
-		readMessage:          cfg.ReadIncomingMessage,
-		outgoingMessageType:  orDefault(cfg.OutgoingMessageType, Text),
-		writeOutgoingMessage: orDefault(cfg.WriteOutgoingMessage, WriteJSON),
-		logFn:                orDefault(cfg.Logger, log.Println),
+		context:        ctx,
+		tag:            fmt.Sprintf("[hub=%s]", orDefault(cfg.Tag, defaultTag)),
+		acceptOptions:  orDefault(cfg.AcceptOptions, defaultAcceptOptions),
+		getCloseStatus: orDefault(cfg.GetCloseStatus, DefaultCloseStatus),
+		sendQueue: orDefaultLazy(cfg.SendQueue, func() SendQueue {
+			return NewBufferedChannelQueue(orDefault(cfg.SendQueueSize, defaultBufferedQueueSize))
+		}),
+		perConnectionBufferSize: orDefault(cfg.PerConnectionSendBufferSize, defaultSendBufferSize),
+		pingInterval:            orDefault(cfg.PingInterval, 0),
+		authenticate:            cfg.Authenticate,
+		accept:                  cfg.Accept,
+		readMessage:             cfg.ReadIncomingMessage,
+		outgoingMessageType:     orDefault(cfg.OutgoingMessageType, Text),
+		writeOutgoingMessage:    orDefault(cfg.WriteOutgoingMessage, WriteJSON),
+		logFn:                   orDefault(cfg.Logger, log.Println),
 
 		nextConnectionID:  0,
 		registrations:     make(chan registration[ID, IM]),
 		closedConnections: make(chan *Conn[ID, IM]),
 		incomingInt:       make(chan IncomingMessage[ID, IM]),
-		outgoingInt:       make(chan any),
 
 		connections:    make(chan *Conn[ID, IM]),
 		disconnections: make(chan *Conn[ID, IM]),
@@ -198,7 +180,7 @@ func (s *Hub[ID, IM]) makeConnection(r *http.Request, clientID ID, clientInfo an
 		clientID:     clientID,
 		client:       clientInfo,
 		sock:         sock,
-		outgoing:     make(chan any, s.sendBufferSize),
+		outgoing:     make(chan any, s.perConnectionBufferSize),
 	}
 }
 
@@ -310,6 +292,10 @@ func (s *Hub[ID, IM]) readPump(conn *Conn[ID, IM]) {
 }
 
 func (s *Hub[ID, IM]) run() {
+	if runnable, ok := s.sendQueue.(RunnableSendQueue); ok {
+		go runnable.Run(s.context)
+	}
+
 	defer s.cancelAllConnections()
 	for s.context.Err() == nil {
 		s.tick()
@@ -366,8 +352,8 @@ func (s *Hub[ID, IM]) tick() {
 			return
 		}
 
-	case og := <-s.outgoingInt:
-		s.sendOutgoingMessage(og)
+	case env := <-s.sendQueue.Envelopes():
+		s.dispatchEnvelope(env)
 
 	case <-s.context.Done():
 		return
@@ -375,19 +361,23 @@ func (s *Hub[ID, IM]) tick() {
 	}
 }
 
-func (s *Hub[ID, IM]) sendOutgoingMessage(og any) {
-	switch msg := og.(type) {
-	case connectionOutgoingMessage[ID, IM]:
-		s.sendToConnection(msg.Connection, msg.Msg)
-	case multiConnectionOutgoingMessage[ID, IM]:
-		for _, conn := range msg.Connections {
-			s.sendToConnection(conn, msg.Msg)
+func (s *Hub[ID, IM]) dispatchEnvelope(env Envelope) {
+	switch env.targetType {
+	case envBroadcast:
+		for _, conn := range s.roster.connections {
+			s.sendToConnection(conn, env.msg)
 		}
-	case clientOutgoingMessage[ID]:
-		s.sendToClient(msg.ClientID, msg.Msg)
-	case multiClientOutgoingMessage[ID]:
-		for _, id := range msg.ClientIDs {
-			s.sendToClient(id, msg.Msg)
+	case envSingleConnection:
+		s.sendToConnection(env.target.(*Conn[ID, IM]), env.msg)
+	case envMultiConnection:
+		for _, conn := range env.target.([]*Conn[ID, IM]) {
+			s.sendToConnection(conn, env.msg)
+		}
+	case envSingleClient:
+		s.sendToClient(env.target.(ID), env.msg)
+	case envMultiClient:
+		for _, id := range env.target.([]ID) {
+			s.sendToClient(id, env.msg)
 		}
 	}
 }

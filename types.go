@@ -44,10 +44,13 @@ type Config[ID comparable, IM any] struct {
 	// cause of closure.
 	GetCloseStatus func(cause int, err error) CloseStatus
 
+	SendQueue     SendQueue
+	SendQueueSize int
+
 	// Maximum number of outgoing messages that can be queued for
 	// any connection. Currently this must be set; an unbounded
 	// queue is not supported. This may change in the future.
-	SendBufferSize int
+	PerConnectionSendBufferSize int
 
 	// Authentication callback; this function should use the provided
 	// websocket and HTTP request to authenticate the client, returning
