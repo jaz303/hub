@@ -36,7 +36,11 @@ func MultipleClientConnectionsAllowed[ID comparable, IM any]() func(conn *Conn[I
 	}
 }
 
+// Binary indicates that every outgoing message is encoded as binary
 func Binary(v any) (websocket.MessageType, error) { return websocket.MessageBinary, nil }
-func Text(v any) (websocket.MessageType, error)   { return websocket.MessageText, nil }
 
+// Text indicates that every outgoing message is encoded as text
+func Text(v any) (websocket.MessageType, error) { return websocket.MessageText, nil }
+
+// WriteJSON encodes each outgoing message using a *json.Encoder
 func WriteJSON(dst io.Writer, msg any) error { return json.NewEncoder(dst).Encode(msg) }
